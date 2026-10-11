@@ -1,0 +1,12 @@
+# Ambiente virtual
+.venv/
+
+# Cache do Python
+__pycache__/
+*.pyc
+
+# Credenciais
+accounts.py
+
+# pasta de downloads do projeto
+downloads/
