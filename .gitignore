@@ -10,3 +10,6 @@ accounts.py
 
 # pasta de downloads do projeto
 downloads/
+
+# json que registra a fila do notebooklm
+fila_notebooklm.json
