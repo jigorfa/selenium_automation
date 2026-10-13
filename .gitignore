@@ -1,15 +1,30 @@
-# Ambiente virtual
-.venv/
+# Dados sensiveis
+accounts.py
+modelo_relatorio.pdf
+modelo_relatorio.docx
+.env
 
-# Cache do Python
+# Ambientes virtuais
+.venv/
+venv/
+.venv-build/
+
+# Python
 __pycache__/
 *.pyc
 
-# Credenciais
-accounts.py
+# Gerados pelo build do .exe
+build/
+dist/
+*.spec
 
-# pasta de downloads do projeto
+# Dados da execução (não são código)
 downloads/
-
-# json que registra a fila do notebooklm
 fila_notebooklm.json
+*.parte
+erro.log
+
+# Editor / sistema
+.vscode/
+.idea/
+.DS_Store

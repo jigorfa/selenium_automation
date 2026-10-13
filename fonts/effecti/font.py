@@ -1,7 +1,10 @@
 """Fonte Effecti: junta login, navegação e download no contrato de Fonte."""
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 
-from accounts import EFFECTI
+try:
+    from accounts import EFFECTI
+except ImportError:  # sem accounts.py: o aviso amigável sai em coletar()
+    EFFECTI = {}
 from browser.driver import criar_driver
 from cli import pedir_data, pedir_opcao
 from config import FECHAR_NAVEGADOR
@@ -25,7 +28,10 @@ class Effecti(Fonte):
         perfil = parametros["perfil"]
 
         if not EFFECTI.get("username") or not EFFECTI.get("password"):
-            raise RuntimeError("Preencha usuário e senha do Effecti em accounts.py.")
+            raise RuntimeError(
+                "Preencha usuário e senha do Effecti no arquivo accounts.py "
+                "(na mesma pasta do programa; veja accounts.exemplo.py)."
+            )
 
         licitacoes = []
         driver = criar_driver()

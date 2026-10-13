@@ -1,10 +1,13 @@
 """Processa a fila: cria o notebook, envia as fontes, roda o prompt, salva a resposta."""
+import glob
 import json
 import os
 import time
+from dataclasses import dataclass, field
 
 from config import (
     ARQUIVO_FILA,
+    COMO_REPROCESSAR,
     MAX_FALHAS_SEGUIDAS,
     ESPERA_ENTRE_PASSADAS,
     EXTENSAO_PARTE,
@@ -21,10 +24,11 @@ from notebooklm.client import (
     adicionar_arquivo,
     consultar,
     criar_notebook,
+    SemResposta,
     erro_passageiro,
     testar_conexao,
 )
-from notebooklm.prompts import obter_prompts
+from notebooklm.prompts import obter_alternativas, obter_prompts
 from notebooklm.queue import carregar_fila, salvar_fila
 from notebooklm.report import gerar_relatorio, modelo_para
 
@@ -39,6 +43,68 @@ def extrair_resposta(saida):
     except (json.JSONDecodeError, AttributeError):
         pass
     return saida
+
+
+class ParteIncompleta(RuntimeError):
+    """Alguns pedaços da parte ficaram sem resposta; `texto` guarda o que veio."""
+
+    def __init__(self, texto, faltam, n):
+        super().__init__(
+            f"{faltam} pedaço(s) da parte {n + 1} ficaram sem resposta (no answer); "
+            f"Para completar, {COMO_REPROCESSAR}."
+        )
+        self.texto = texto
+
+
+def _ler(arq):
+    with open(arq, encoding="utf-8") as f:
+        return f.read()
+
+
+def _gravar(arq, texto):
+    with open(arq, "w", encoding="utf-8") as f:
+        f.write(texto)
+
+
+def _consultar_parte(notebook_id, pasta, n, prompt):
+    """Consulta uma parte. Se o NotebookLM não gerar resposta, refaz em pedaços menores
+    (cada pedaço respondido fica em cache, então uma nova rodada só refaz o que faltou)."""
+    pedacos = obter_alternativas(n)
+    cache = lambda k: os.path.join(pasta, f"parte_{n + 1}_{k + 1}{EXTENSAO_PARTE}")
+    ja_dividida = any(os.path.exists(cache(k)) for k in range(len(pedacos)))
+
+    if not ja_dividida:
+        try:
+            return extrair_resposta(consultar(notebook_id, prompt))
+        except SemResposta:
+            if not pedacos:
+                raise
+            print(f"    Sem resposta para a parte inteira; refazendo em {len(pedacos)} pedaços menores...")
+
+    textos, faltam = [], 0
+    for k, (rotulo, sub) in enumerate(pedacos):
+        if os.path.exists(cache(k)):
+            textos.append(_ler(cache(k)))
+            print(f"      Pedaço {k + 1}/{len(pedacos)} ({rotulo}) já respondido; reaproveitando.")
+            continue
+        time.sleep(PAUSA_APOS_UPLOAD)
+        print(f"      Pedaço {k + 1}/{len(pedacos)}: {rotulo}")
+        try:
+            texto = extrair_resposta(consultar(notebook_id, sub))
+        except SemResposta:
+            faltam += 1
+            print("        sem resposta")
+            textos.append(f"**[NÃO GERADO: {rotulo} - o NotebookLM não respondeu.]**")
+            continue
+        _gravar(cache(k), texto)
+        textos.append(texto)
+
+    resultado = "\n\n".join(textos)
+    if faltam == len(pedacos):
+        raise SemResposta("The notebook returned no answer (todos os pedaços).")
+    if faltam:
+        raise ParteIncompleta(resultado, faltam, n)
+    return resultado
 
 
 def processar_job(fila, pasta, job):
@@ -84,15 +150,12 @@ def processar_job(fila, pasta, job):
     destino = os.path.join(pasta, NOME_RELATORIO)
     modelo = modelo_para(job.get("perfil"))
     respostas = {}
-    arquivos_parte = []
 
     for n, (_, prompt) in enumerate(partes):
         arq = os.path.join(pasta, f"parte_{n + 1}{EXTENSAO_PARTE}")
-        arquivos_parte.append(arq)
 
         if os.path.exists(arq):  # respondida numa tentativa anterior: não gasta consulta
-            with open(arq, encoding="utf-8") as f:
-                respostas[n] = f.read()
+            respostas[n] = _ler(arq)
             print(f"    Parte {n + 1}/{len(partes)} já respondida; reaproveitando.")
             continue
 
@@ -100,19 +163,22 @@ def processar_job(fila, pasta, job):
             time.sleep(PAUSA_APOS_UPLOAD)
         print(f"    Executando o prompt, parte {n + 1}/{len(partes)} (pode demorar alguns minutos)...")
         try:
-            respostas[n] = extrair_resposta(consultar(notebook_id, prompt))
+            respostas[n] = _consultar_parte(notebook_id, pasta, n, prompt)
+        except ParteIncompleta as erro:
+            respostas[n] = erro.texto  # relatório parcial, com aviso nos pedaços que faltam
+            _salvar_relatorio(partes, respostas, destino, modelo)
+            raise
         except Exception:
             if respostas:  # não perde o que já veio: grava o relatório parcial
                 _salvar_relatorio(partes, respostas, destino, modelo)
             raise
 
-        with open(arq, "w", encoding="utf-8") as f:
-            f.write(respostas[n])
+        _gravar(arq, respostas[n])
 
     _salvar_relatorio(partes, respostas, destino, modelo)
-    for arq in arquivos_parte:  # relatório completo: o cache de retomada não é mais preciso
-        if os.path.exists(arq):
-            os.remove(arq)
+    # relatório completo: o cache de retomada (parte_*.parte) não é mais preciso
+    for arq in glob.glob(os.path.join(glob.escape(pasta), f"parte_*{EXTENSAO_PARTE}")):
+        os.remove(arq)
 
 
 def montar_markdown(partes, respostas):
@@ -124,7 +190,7 @@ def montar_markdown(partes, respostas):
         blocos.append(
             respostas.get(n)
             or f"**[NÃO GERADO: {titulo or 'relatório'} - o NotebookLM não respondeu. "
-               "Rode python main.py --fila para completar.]**"
+               f"Para completar, {COMO_REPROCESSAR}.]**"
         )
     return "\n\n".join(blocos)
 
@@ -178,25 +244,48 @@ def _rodar_passada(fila, pendentes):
     return True
 
 
+@dataclass
+class ResultadoFila:
+    """O que aconteceu ao processar a fila (quem chama decide o que perguntar ao usuário)."""
+    motivo_parada: str | None = None   # "sem_modelo" | "sem_login" | None (rodou normalmente)
+    detalhe: str = ""                  # mensagem do problema, quando houve parada
+    concluidos: int = 0
+    total: int = 0
+    falhas: list = field(default_factory=list)  # [(nome da licitação, mensagem de erro)]
+
+
+def _resultado(fila, motivo=None, detalhe=""):
+    return ResultadoFila(
+        motivo_parada=motivo,
+        detalhe=detalhe,
+        concluidos=sum(1 for j in fila.values() if j.get("status") == "concluido"),
+        total=len(fila),
+        falhas=[
+            (os.path.basename(p), j.get("erro") or "não processada")
+            for p, j in fila.items() if j.get("status") != "concluido"
+        ],
+    )
+
+
 def processar_fila():
     fila = carregar_fila()
     pendentes = [(p, j) for p, j in fila.items() if j.get("status") != "concluido"]
 
     print(f"\n===== FILA NOTEBOOKLM: {len(pendentes)} pendente(s) =====")
     if not pendentes:
-        return
+        return _resultado(fila)
 
     if not os.path.exists(MODELO_RELATORIO):
-        print(f"Modelo de relatório não encontrado: {MODELO_RELATORIO}")
-        print("Ajuste MODELO_RELATORIO em config.py e rode: python main.py --fila")
-        return
+        detalhe = f"Modelo de relatório não encontrado: {MODELO_RELATORIO}"
+        print(detalhe)
+        print("Coloque o arquivo modelo_relatorio.pdf nessa pasta (ou ajuste MODELO_RELATORIO em config.py).")
+        return _resultado(fila, "sem_modelo", detalhe)
 
     try:
         testar_conexao()
     except Exception as erro:
         print(f"Não consegui falar com o NotebookLM: {erro}")
-        print("Se for login, rode 'nlm login' e depois: python main.py --fila")
-        return
+        return _resultado(fila, "sem_login", str(erro))
 
     for passada in range(1, MAX_PASSADAS + 1):
         if passada > 1:
@@ -212,7 +301,6 @@ def processar_fila():
         print(f"\n{len(restantes)} sem resposta. Nova passada em {ESPERA_ENTRE_PASSADAS // 60} min...")
         time.sleep(ESPERA_ENTRE_PASSADAS)
 
-    concluidos = sum(1 for j in fila.values() if j["status"] == "concluido")
-    print(f"\nFila: {concluidos}/{len(fila)} concluído(s). Estado em: {ARQUIVO_FILA}")
-    for pasta in _falhas_passageiras(fila):
-        print(f"   sem resposta: {os.path.basename(pasta)}  (notebook {fila[pasta].get('notebook_id')})")
+    resultado = _resultado(fila)
+    print(f"\nFila: {resultado.concluidos}/{resultado.total} concluído(s). Estado em: {ARQUIVO_FILA}")
+    return resultado

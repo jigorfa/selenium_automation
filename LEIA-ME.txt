@@ -1,0 +1,32 @@
+ALGORITMO - gerador de relatorios de licitacao
+===============================================
+
+ANTES DE USAR (so na primeira vez)
+  1. Tenha o Mozilla Firefox instalado (o programa baixa os editais por ele).
+  2. Copie "accounts.exemplo.py" para "accounts.py" e preencha usuario e senha do Effecti.
+  3. Deixe nesta pasta os dois arquivos de modelo:
+       modelo_relatorio.pdf   e   modelo_relatorio.docx
+  4. De duplo clique em Algoritmo.exe e escolha "Fazer login no NotebookLM".
+     Entre na conta Google que usa o NotebookLM e aguarde a janela fechar sozinha.
+     Se o login vencer algum dia, repita este passo.
+
+COMO USAR
+  - Duplo clique em Algoritmo.exe e escolha:
+      1. Baixar licitacoes e gerar relatorios  -> fluxo completo
+      2. Processar a fila de relatorios pendentes -> sem baixar nada
+      3. Fazer login no NotebookLM
+  - Os relatorios (relatorio.docx) ficam dentro da pasta de cada licitacao, em "downloads".
+
+SE ALGUM RELATORIO NAO FOR GERADO
+  O programa mostra a lista dos que falharam e pergunta:
+  "Deseja tentar gerar os relatorios que falharam agora?"
+    - Responda "s" para tentar de novo na hora.
+    - Responda "n" para deixar para depois: abra o programa e escolha a opcao 2.
+  Se continuar falhando, espere de 30 a 60 minutos ou tente no dia seguinte
+  (o NotebookLM tem limite diario de consultas). O que ja foi respondido fica salvo.
+
+SE DER ERRO INESPERADO
+  Os detalhes ficam no arquivo "erro.log", nesta pasta. Envie esse arquivo para o suporte.
+
+IMPORTANTE
+  Nao envie a pasta com o arquivo accounts.py para quem nao deve ter a senha do Effecti.
