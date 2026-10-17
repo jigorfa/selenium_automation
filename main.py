@@ -16,6 +16,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "--nlm":
     cli_main()
     raise SystemExit(0)
 
+import os
 import re
 import traceback
 from datetime import datetime
@@ -25,7 +26,7 @@ from config import BASE_DIR, COMO_REPROCESSAR, ENVIAR_NOTEBOOKLM, EXECUTAVEL
 from fonts import FONTES
 from notebooklm.client import ERROS_DE_LOGIN, erro_passageiro, login_nlm
 from notebooklm.processor import processar_fila
-from notebooklm.queue import enfileirar
+from notebooklm.queue import carregar_fila, enfileirar, salvar_fila
 
 OPCAO_COMPLETO = "Baixar licitações e gerar relatórios (fluxo completo)"
 OPCAO_FILA = "Processar a fila de relatórios pendentes (sem baixar nada)"
@@ -80,12 +81,55 @@ def mostrar_falhas(resultado):
         print("  * O NotebookLM não respondeu. Costuma ser instabilidade ou o limite diário de consultas.")
         print("    Tentar de novo agora às vezes funciona; se falhar outra vez, espere de 30 a 60 minutos")
         print("    ou tente amanhã. O que já foi respondido fica salvo e não é refeito.")
+    if any("Nenhum arquivo compatível" in e for _, e in falhas):
+        print("  * Licitação sem arquivo utilizável, mesmo depois de baixar de novo: baixe os anexos")
+        print("    manualmente pelo Effecti, coloque-os na pasta da licitação e processe a fila.")
     print(f"  * Para tentar mais tarde, {COMO_REPROCESSAR}.")
     print("=" * 60)
 
 
-def processar_fila_interativo():
-    """Processa a fila; se algo falhar, explica e pergunta se quer tentar de novo agora."""
+def rebaixar_remanescentes(fonte, parametros, pastas):
+    """Volta ao download das licitações que ficaram sem arquivo utilizável.
+
+    Cada licitação ganha UMA nova tentativa de download (a marca fica gravada na fila);
+    se continuar sem arquivo, ela é apenas listada como falha. Devolve o conjunto de pastas
+    que foram baixadas de novo e recolocadas na fila."""
+    print("\n" + "=" * 60)
+    print(f"VOLTANDO AO DOWNLOAD: {len(pastas)} licitação(ões) ficaram sem arquivo utilizável:")
+    for pasta in pastas:
+        print(f"  - {os.path.basename(pasta)}")
+    print("=" * 60)
+
+    # Marca ANTES de baixar: haja o que houver, só se tenta uma vez por licitação
+    fila = carregar_fila()
+    for pasta in pastas:
+        fila[pasta]["redownload_tentado"] = True
+    salvar_fila(fila)
+
+    try:
+        novas = fonte.rebaixar(parametros, pastas)
+    except Exception as erro:
+        print(f"\nNão consegui baixar de novo: {type(erro).__name__}: {erro}")
+        return set()
+
+    reenfileiradas = set()
+    for licitacao in novas:
+        enfileirar(licitacao, novo_ciclo=False)  # mantém a marca "já baixada de novo"
+        reenfileiradas.add(os.path.abspath(licitacao.pasta))
+
+    sem_arquivo = [os.path.basename(p) for p in pastas if os.path.abspath(p) not in reenfileiradas]
+    if sem_arquivo:
+        print(f"\nO download não trouxe arquivos para {len(sem_arquivo)} licitação(ões); seguindo sem elas:")
+        for nome in sem_arquivo:
+            print(f"  - {nome}")
+    return reenfileiradas
+
+
+def processar_fila_interativo(fonte=None, parametros=None):
+    """Processa a fila; se algo falhar, explica e pergunta se quer tentar de novo agora.
+
+    Com `fonte` e `parametros` (fluxo completo), as licitações que ficaram sem arquivo
+    utilizável voltam ao download uma vez, ao fim da fila, e são processadas de novo."""
     while True:
         resultado = processar_fila()
 
@@ -99,6 +143,11 @@ def processar_fila_interativo():
                 continue
             print(f"\nQuando fizer o login, {COMO_REPROCESSAR}.")
             return
+
+        if fonte is not None and resultado.sem_arquivos:
+            reenfileiradas = rebaixar_remanescentes(fonte, parametros, resultado.sem_arquivos)
+            if reenfileiradas:
+                resultado = processar_fila(somente=reenfileiradas)
 
         if not resultado.falhas:
             if resultado.total:
@@ -129,7 +178,7 @@ def fluxo_completo():
     if ENVIAR_NOTEBOOKLM:
         for licitacao in licitacoes:
             enfileirar(licitacao)
-        processar_fila_interativo()
+        processar_fila_interativo(fonte, parametros)
 
 
 def menu():

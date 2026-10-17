@@ -38,11 +38,14 @@ def salvar_fila(fila):
     os.replace(temporario, ARQUIVO_FILA)
 
 
-def enfileirar(licitacao):
+def enfileirar(licitacao, novo_ciclo=True):
     """Recebe um models.Licitacao e guarda tudo que o --fila vai precisar.
 
     Se a pasta já estava na fila (data refeita), ela volta a ficar pendente:
-    reaproveita o notebook e os arquivos já enviados e só refaz a consulta."""
+    reaproveita o notebook e os arquivos já enviados e só refaz a consulta.
+
+    novo_ciclo=True (download novo) zera as marcas de "sem arquivos"/"baixado de novo";
+    False é usado quando a própria nova tentativa de download recoloca a licitação na fila."""
     fila = carregar_fila()
     pasta = os.path.abspath(licitacao.pasta)
 
@@ -70,6 +73,9 @@ def enfileirar(licitacao):
             os.remove(antigo)
         fila[pasta]["status"] = "pendente"
         fila[pasta]["erro"] = None
+        if novo_ciclo:
+            fila[pasta].pop("sem_arquivos", None)
+            fila[pasta].pop("redownload_tentado", None)
         print(f"    Já estava na fila; será processada de novo: {os.path.basename(pasta)}")
 
     salvar_fila(fila)

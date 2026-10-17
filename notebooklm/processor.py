@@ -45,6 +45,11 @@ def extrair_resposta(saida):
     return saida
 
 
+class SemArquivos(RuntimeError):
+    """A pasta não tem nenhum arquivo utilizável (vazia, só arquivos de 0 bytes ou de tipo
+    não aceito). Em geral é falha de DOWNLOAD: vale baixar de novo (ver main.py)."""
+
+
 class ParteIncompleta(RuntimeError):
     """Alguns pedaços da parte ficaram sem resposta; `texto` guarda o que veio."""
 
@@ -114,7 +119,7 @@ def processar_job(fila, pasta, job):
 
     arquivos = coletar_arquivos(pasta)
     if not arquivos:
-        raise RuntimeError(
+        raise SemArquivos(
             "Nenhum arquivo compatível (PDF/DOCX/TXT/MD) na pasta. "
             + descrever_pasta(pasta)
         )
@@ -215,23 +220,29 @@ def _falhas_passageiras(fila):
     """Pastas cujo último erro foi 'sem resposta'/limite/timeout (vale tentar de novo)."""
     return [
         p for p, j in fila.items()
-        if j.get("status") == "erro" and erro_passageiro(RuntimeError(j.get("erro") or ""))
+        if j.get("status") == "erro" and not j.get("sem_arquivos")
+        and erro_passageiro(RuntimeError(j.get("erro") or ""))
     ]
 
 
 def _rodar_passada(fila, pendentes):
     falhas_seguidas = 0
+    consultou = True  # False se a licitação anterior falhou antes de falar com o NotebookLM
     for numero, (pasta, job) in enumerate(pendentes):
-        if numero > 0:
+        if numero > 0 and consultou:
             time.sleep(PAUSA_ENTRE_LICITACOES)  # evita consultas em sequência rápida
         try:
             processar_job(fila, pasta, job)
             job["status"] = "concluido"
             job["erro"] = None
+            job.pop("sem_arquivos", None)
             falhas_seguidas = 0
+            consultou = True
         except Exception as erro:
             job["status"] = "erro"
             job["erro"] = str(erro)
+            job["sem_arquivos"] = isinstance(erro, SemArquivos)
+            consultou = not isinstance(erro, SemArquivos)
             print(f"    ERRO: {erro}")
             print(f"    (notebook: {job.get('notebook_id')})")
             # Só conta "sem resposta/limite"; erro de arquivo, por exemplo, não conta
@@ -252,6 +263,7 @@ class ResultadoFila:
     concluidos: int = 0
     total: int = 0
     falhas: list = field(default_factory=list)  # [(nome da licitação, mensagem de erro)]
+    sem_arquivos: list = field(default_factory=list)  # pastas sem arquivo utilizável, ainda não baixadas de novo
 
 
 def _resultado(fila, motivo=None, detalhe=""):
@@ -264,12 +276,20 @@ def _resultado(fila, motivo=None, detalhe=""):
             (os.path.basename(p), j.get("erro") or "não processada")
             for p, j in fila.items() if j.get("status") != "concluido"
         ],
+        sem_arquivos=[
+            p for p, j in fila.items()
+            if j.get("status") == "erro" and j.get("sem_arquivos") and not j.get("redownload_tentado")
+        ],
     )
 
 
-def processar_fila():
+def processar_fila(somente=None):
+    """Processa a fila. `somente` (conjunto de pastas) limita o trabalho a essas licitações."""
     fila = carregar_fila()
-    pendentes = [(p, j) for p, j in fila.items() if j.get("status") != "concluido"]
+    pendentes = [
+        (p, j) for p, j in fila.items()
+        if j.get("status") != "concluido" and (somente is None or p in somente)
+    ]
 
     print(f"\n===== FILA NOTEBOOKLM: {len(pendentes)} pendente(s) =====")
     if not pendentes:
@@ -289,11 +309,11 @@ def processar_fila():
 
     for passada in range(1, MAX_PASSADAS + 1):
         if passada > 1:
-            pendentes = [(p, fila[p]) for p in _falhas_passageiras(fila)]
+            pendentes = [(p, fila[p]) for p in _falhas_passageiras(fila) if somente is None or p in somente]
             print(f"\n===== PASSADA {passada}/{MAX_PASSADAS}: {len(pendentes)} para tentar de novo =====")
 
         completou = _rodar_passada(fila, pendentes)
-        restantes = _falhas_passageiras(fila)
+        restantes = [p for p in _falhas_passageiras(fila) if somente is None or p in somente]
 
         if not completou or not restantes or passada == MAX_PASSADAS:
             break

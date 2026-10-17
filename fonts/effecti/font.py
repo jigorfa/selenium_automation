@@ -1,4 +1,6 @@
 """Fonte Effecti: junta login, navegação e download no contrato de Fonte."""
+import os
+
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 
 try:
@@ -24,6 +26,14 @@ class Effecti(Fonte):
         }
 
     def coletar(self, parametros):
+        return self._executar(parametros, None)
+
+    def rebaixar(self, parametros, pastas):
+        """Repete login e navegação e baixa de novo só as licitações das `pastas`."""
+        alvo = {os.path.normcase(os.path.abspath(p)) for p in pastas}
+        return self._executar(parametros, alvo)
+
+    def _executar(self, parametros, somente_pastas):
         data = parametros["data"]
         perfil = parametros["perfil"]
 
@@ -41,7 +51,7 @@ class Effecti(Fonte):
             abrir_historico(driver, perfil, data)
 
             if aguardar_licitacoes(driver):
-                processar_licitacoes(driver, data, perfil, licitacoes)
+                processar_licitacoes(driver, data, perfil, licitacoes, somente_pastas)
             else:
                 print("\nNenhuma licitação encontrada em nenhum contexto.")
 

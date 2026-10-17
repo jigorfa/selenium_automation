@@ -60,9 +60,24 @@ def mover_arquivos_novos(arquivos_antes, pasta):
         origem = os.path.join(DOWNLOAD_DIR, nome)
         if nome.endswith(".part") or not os.path.isfile(origem):
             continue
-        shutil.move(origem, os.path.join(pasta, nome))
+        if os.path.getsize(origem) == 0:
+            print(f"    ATENÇÃO: o download de {nome} veio VAZIO (0 bytes); ele precisará ser baixado de novo.")
+        destino = os.path.join(pasta, nome)
+        if os.path.exists(destino):  # download repetido: o novo substitui o antigo (no Windows o move falharia)
+            os.remove(destino)
+        shutil.move(origem, destino)
         movidos.append(nome)
     return movidos
+
+
+def remover_arquivos_vazios(pasta):
+    """Apaga os arquivos de 0 bytes da pasta (downloads que falharam) antes de baixar de novo."""
+    for raiz, _, arquivos in os.walk(pasta):
+        for arq in arquivos:
+            caminho = os.path.join(raiz, arq)
+            if os.path.getsize(caminho) == 0:
+                os.remove(caminho)
+                print(f"    Removido arquivo vazio: {arq}")
 
 
 def nome_seguro(texto, limite=80):
@@ -71,9 +86,12 @@ def nome_seguro(texto, limite=80):
     return texto[:limite].strip(" .") or "sem_titulo"
 
 
-def pasta_da_licitacao(fonte, data, numero, titulo):
-    """downloads/<fonte>/<DD-MM-AAAA>/<NN>_<titulo>/"""
+def pasta_da_licitacao(fonte, data, empresa, numero, titulo):
+    """downloads/<fonte>/<DD-MM-AAAA>/<empresa>/<NN>_<titulo>/"""
     dia = data.replace("/", "-")
-    pasta = os.path.join(DOWNLOAD_DIR, fonte, dia, f"{numero:02d}_{nome_seguro(titulo)}")
+    pasta = os.path.join(
+        DOWNLOAD_DIR, fonte, dia, nome_seguro(empresa or "sem_empresa"),
+        f"{numero:02d}_{nome_seguro(titulo)}",
+    )
     os.makedirs(pasta, exist_ok=True)
     return pasta

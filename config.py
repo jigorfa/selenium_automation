@@ -20,11 +20,17 @@ ARQUIVO_FILA = str(BASE_DIR / "fila_notebooklm.json")
 
 # ATENÇÃO: o NotebookLM usa o NOME DO ARQUIVO como nome da fonte, e o prompt
 # cita esse nome ("Novo Modelo do Relatório"). Nomeie o arquivo de acordo.
-MODELO_RELATORIO = str(BASE_DIR / "modelo_relatorio.pdf")
 
+MODELO_USUARIO = Path.home() / "Documents" / "modelos_relatorio" / "modelo_relatorio.pdf"
+MODELO_PADRAO = str(BASE_DIR / "modelo_relatorio.pdf")
+MODELO_RELATORIO = str(MODELO_USUARIO if MODELO_USUARIO.is_file() else MODELO_PADRAO)
 
 # Relatório final: o modelo .docx é preenchido com a resposta do NotebookLM
-MODELO_DOCX = str(BASE_DIR / "modelo_relatorio.docx")
+
+MODELO_DOCX_USUARIO = Path.home() / "Documents" / "modelos_relatorio" / "modelo_relatorio.docx"
+MODELO_DOCX_PADRAO = str(BASE_DIR / "modelo_relatorio.docx")
+MODELO_DOCX = str(MODELO_DOCX_USUARIO if MODELO_DOCX_USUARIO.is_file() else MODELO_DOCX_PADRAO)
+
 # Se algum perfil usar outro modelo: {"Nome exato do perfil": "caminho/modelo.docx"}
 MODELOS_DOCX_POR_PERFIL = {}
 NOME_RELATORIO = "relatorio.docx"
