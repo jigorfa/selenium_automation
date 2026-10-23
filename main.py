@@ -5,8 +5,8 @@ Uso:
     python main.py                 # menu (ou duplo clique no .exe)
     python main.py --fila          # só processa a fila (pergunta a ferramenta)
     python main.py --fila --claude # só processa a fila, com o Claude (ou --gemini)
-    python main.py --login         # só faz o login no NotebookLM
-    python main.py --login-claude  # só faz o login no Claude (assinatura)
+    python main.py --login         # login em uma IA (pergunta: Gemini ou Claude)
+    python main.py --login-claude  # login direto no Claude (assinatura)
 """
 import sys
 
@@ -34,8 +34,7 @@ from notebooklm.queue import carregar_fila, enfileirar, salvar_fila
 
 OPCAO_COMPLETO = "Baixar licitações e gerar relatórios (fluxo completo)"
 OPCAO_FILA = "Processar a fila de relatórios pendentes (sem baixar nada)"
-OPCAO_LOGIN = "Fazer login no NotebookLM"
-OPCAO_LOGIN_CLAUDE = "Fazer login no Claude (assinatura)"
+OPCAO_LOGIN = "Fazer login em uma IA (Gemini ou Claude)"
 
 
 def escolher_fonte():
@@ -89,7 +88,8 @@ def _e_erro_de_login(texto):
     return any(trecho in (texto or "").lower() for trecho in ERROS_DE_LOGIN)
 
 
-def fazer_login():
+def fazer_login_gemini():
+    """Login no NotebookLM (Gemini). Devolve True se concluiu, False se não."""
     print("\nVai abrir o navegador. Entre na conta Google que usa o NotebookLM e aguarde a janela fechar.\n")
     if login_nlm(forcar=True):
         print("\nLogin concluído.")
@@ -116,7 +116,19 @@ def fazer_login_claude():
         print(f"\n{erro}")
         return False
     print("\nLogin concluído." if ok else "\nO login não foi concluído. Tente de novo.")
-    return ok
+    return bool(ok)  # assinatura.login() pode devolver outro tipo; aqui vira sempre True/False
+
+
+def fazer_login_ia():
+    """Opção única do menu: pergunta em qual IA fazer o login e chama a função dela."""
+    opcoes = {"Gemini (NotebookLM)": fazer_login_gemini}
+    if CLAUDE_MODO == "assinatura":  # no modo API não há login: usa a chave do accounts.py
+        opcoes["Claude (assinatura)"] = fazer_login_claude
+    else:
+        print("\n(O Claude está configurado para usar chave de API, então não precisa de login.)")
+
+    escolha = pedir_opcao("Login em qual IA?", list(opcoes), confirmar_escolha=False)
+    return opcoes[escolha]()
 
 
 def _dicas_claude(falhas):
@@ -221,7 +233,7 @@ def processar_fila_interativo(fonte=None, parametros=None, ferramenta=None):
         if resultado.motivo_parada == "sem_login":
             print("\nNão foi possível acessar o NotebookLM (provavelmente o login venceu ou não foi feito).")
             if confirmar("Deseja fazer o login no NotebookLM agora?"):
-                fazer_login()
+                fazer_login_gemini()
                 continue
             if confirmar("Deseja gerar os relatórios com o Claude no lugar?"):
                 ferramenta = "claude"
@@ -267,7 +279,7 @@ def processar_fila_interativo(fonte=None, parametros=None, ferramenta=None):
 
         if ferramenta == "gemini" and any(_e_erro_de_login(e) for _, e in resultado.falhas) and \
                 confirmar("\nDeseja fazer o login no NotebookLM antes de tentar de novo?"):
-            fazer_login()
+            fazer_login_gemini()
 
         if not confirmar("\nDeseja tentar gerar os relatórios que falharam agora?"):
             print(f"\nTudo bem. Para tentar depois, {COMO_REPROCESSAR}.")
@@ -300,10 +312,8 @@ def menu():
     acoes = {
         OPCAO_COMPLETO: fluxo_completo,
         OPCAO_FILA: processar_fila_interativo,
-        OPCAO_LOGIN: fazer_login,
+        OPCAO_LOGIN: fazer_login_ia,
     }
-    if CLAUDE_MODO == "assinatura":
-        acoes[OPCAO_LOGIN_CLAUDE] = fazer_login_claude
     escolha = pedir_opcao("O que deseja fazer?", list(acoes), confirmar_escolha=False)
     acoes[escolha]()
 
@@ -314,7 +324,7 @@ def main():
     elif "--login-claude" in sys.argv:
         fazer_login_claude()
     elif "--login" in sys.argv:
-        fazer_login()
+        fazer_login_ia()
     else:
         menu()
 
