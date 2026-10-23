@@ -2,10 +2,41 @@
 REM ============================================================
 REM  Gera o programa Algoritmo.exe (rode UMA vez no Windows)
 REM  Requer: Python 3.11+ instalado (https://www.python.org)
+REM  Instala o Claude Code automaticamente se ainda nao estiver instalado.
 REM ============================================================
 cd /d "%~dp0"
 
-echo [1/4] Criando ambiente de build...
+echo [1/5] Verificando o Claude Code...
+where claude >nul 2>&1 && goto claude_ok
+REM O instalador nativo coloca o claude.exe em %USERPROFILE%\.local\bin
+if exist "%USERPROFILE%\.local\bin\claude.exe" goto claude_path
+
+echo Claude Code nao encontrado. Instalando (instalador oficial)...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://claude.ai/install.ps1 | iex"
+if errorlevel 1 goto claude_falhou
+if not exist "%USERPROFILE%\.local\bin\claude.exe" goto claude_falhou
+
+:claude_path
+REM Garante o claude no PATH desta janela (o instalador ja ajusta o PATH do usuario)
+set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+
+:claude_ok
+claude --version
+REM No Windows nativo o Claude Code usa o Git Bash; so avisa se faltar
+where git >nul 2>&1 || echo AVISO: Git for Windows nao encontrado. O Claude Code precisa dele: https://git-scm.com/downloads/win
+goto claude_fim
+
+:claude_falhou
+echo.
+echo AVISO: nao foi possivel instalar o Claude Code automaticamente.
+echo Instale manualmente depois: abra o PowerShell e rode
+echo     irm https://claude.ai/install.ps1 ^| iex
+echo O build do executavel continua normalmente.
+echo.
+
+:claude_fim
+
+echo [2/5] Criando ambiente de build...
 REM Usa um Python com pacotes prontos (wheels) para todas as dependencias.
 REM Versoes muito novas obrigam o pip a compilar (ex.: pyyaml) e pedem o Visual C++.
 set PYVER=
@@ -29,11 +60,11 @@ if not exist .venv-build (
 )
 call .venv-build\Scripts\activate.bat || goto erro
 
-echo [2/4] Instalando dependencias...
+echo [3/5] Instalando dependencias...
 python -m pip install --upgrade pip || goto erro
 python -m pip install --prefer-binary -r requirements.txt pyinstaller || goto erro
 
-echo [3/4] Gerando o executavel (pode levar alguns minutos)...
+echo [4/5] Gerando o executavel (pode levar alguns minutos)...
 python -m PyInstaller --noconfirm --clean --name Algoritmo --console ^
   --collect-all selenium ^
   --collect-all notebooklm_tools ^
@@ -46,7 +77,7 @@ python -m PyInstaller --noconfirm --clean --name Algoritmo --console ^
   --exclude-module accounts ^
   main.py || goto erro
 
-echo [4/4] Copiando arquivos de apoio...
+echo [5/5] Copiando arquivos de apoio...
 if exist modelo_relatorio.pdf  copy /y modelo_relatorio.pdf  dist\Algoritmo\ >nul
 if exist modelo_relatorio.docx copy /y modelo_relatorio.docx dist\Algoritmo\ >nul
 copy /y accounts.exemplo.py dist\Algoritmo\ >nul
