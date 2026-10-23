@@ -2,49 +2,30 @@ ALGORITMO - gerador de relatorios de licitacao
 ===============================================
 nome da pasta atual: selenium_automation
 
-Requisitos:
+REQUISITOS:
   - Firefox
   - accounts.py (copia o accounts.exemplo.py e preenche os dados de login da Effecti)
   - Manter nessa pasta os modelos do relatorio (.docx e o .pdf)
-  -> Ao executar o algoritmo faça login nas IA's (Gemini e Claude)
-    ->  Dois cliques em Algoritmo.exe e escolha em qual quer fazer login
-        OBS: para fazer login no claude você precisa ter o Claude Code instalado, para instalar abra o
-        PowerShell e rode 
-
-            irm https://claude.ai/install.ps1 | iex
-
-        confira a instalacao com "claude --version"
 
 COMO USAR
-  - Duplo clique em Algoritmo.exe e escolha:
-      1. Baixar licitacoes e gerar relatorios  -> fluxo completo
-      2. Processar a fila de relatorios pendentes -> so funciona
-      3. Fazer login nas ferramentas # Pendente: Fazer uma opçao "3" para o usuário escolher um dos dois logins
-        1. Fazer login no NotebookLM
-        2. Fazer login no Claude (assinatura)
+    - Duplo clique em Algoritmo.exe e escolha:
+        1. Baixar licitacoes e gerar relatorios  -> fluxo completo
+        2. Processar e gerar relatórios pendentes -> so funciona após o download das licitações
+        3. Fazer login nas ferramentas
 
-    Após baixar as licitações o programa poderá executar a fila de relatórios pendentes
-    ao executar a fila de relatórios o programa irá perguntar qual ferramenta será 
-    utilizada para gerar os relatórios.
-    Os relatorios (relatorio.docx) ficam dentro da pasta de cada licitacao, em "downloads".
+    - O relatorio gerado (relatorio.docx) ficam dentro da pasta de cada licitação, na pasta "downloads".
 
 IMPORTANTE:
-    Cuidado ao enviar arquivos desta pasta para outros podem conter dados sensíveis.
-    exemplo:
+    Os arquivos dessa pasta podem conter dados sensíveis, cuidado ao envia-los para outros.
+    Exemplo:
     Não envie a pasta com o arquivo accounts.py para quem nao deve ter a senha do Effecti
     (nem a chave do Claude, se voce usar o modo "api").
 
-SE DER ERRO INESPERADO:
+EM CASO DE ERRO:
     Os detalhes ficam no arquivo "erro.log", nesta pasta. Envie esse arquivo para o suporte.
 
-Detalhes:
+COMPARANDO ASSINATURAS:
     Os relatorios usam a mesma cota do Claude que voce usa no site/app. No plano Pro
-    a cota e pequena (renova a cada poucas horas); para muitos editais por dia, o Max
+    a cota é pequena (renova a cada poucas horas); para muitos editais por dia, o Max
     rende bem mais. Se a cota acabar no meio da fila, o programa para e oferece
     gerar o resto com o Gemini.
-
-(Quem preferir pagar por uso pela API: em config.py, CLAUDE_MODO = "api" e
-coloque sua chave no accounts.py mudando o:
-    CLAUDE = {
-        "api_key": "(coloque sua chave aqui)",
-    }
