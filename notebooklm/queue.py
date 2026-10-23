@@ -65,7 +65,7 @@ def enfileirar(licitacao, novo_ciclo=True):
             "arquivos_enviados": [],
             "erro": None,
         }
-        print(f"    Adicionada à fila do NotebookLM: {os.path.basename(pasta)}")
+        print(f"    Adicionada à fila de relatórios: {os.path.basename(pasta)}")
     else:
         fila[pasta].update(dados)
         # Refazer a data = respostas novas: descarta respostas parciais antigas

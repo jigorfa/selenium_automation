@@ -144,7 +144,7 @@ def _limpar(texto):
         texto = RE_CITACAO.sub("", texto)
     texto = re.sub(r"`([^`]*)`", r"\1", texto)
     texto = texto.replace("\\*", "\x00")
-    texto = re.sub(r"\\([\\_{}\[\]()#+\-.!|>])", r"\1", texto)
+    texto = re.sub(r"\\([\\_{}\[\]()#+\-.!|>$])", r"\1", texto)  # "R\$" -> "R$"
     return texto
 
 

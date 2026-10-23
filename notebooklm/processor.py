@@ -1,13 +1,26 @@
-"""Processa a fila: cria o notebook, envia as fontes, roda o prompt, salva a resposta."""
+"""Processa a fila: prepara os documentos, roda os prompts, salva o relatório.
+
+Duas ferramentas (o usuário escolhe ao rodar):
+    "gemini": cria um notebook no NotebookLM, envia as fontes e consulta pelo "nlm".
+    "claude": monta os documentos aqui e consulta a API do Claude.
+As partes do relatório, o cache de retomada (.parte) e o .docx final são os mesmos.
+"""
 import glob
 import json
 import os
 import time
 from dataclasses import dataclass, field
 
+from claude_api import assinatura
+from claude_api.client import LimiteAssinatura, ParadaGeral, SemChave
+from claude_api.client import consultar as consultar_api, custo_total
+from claude_api.client import testar_conexao as testar_api
+from claude_api.documentos import DocumentosInvalidos, montar_pacote
 from config import (
     ARQUIVO_FILA,
+    CLAUDE_MODO,
     COMO_REPROCESSAR,
+    FERRAMENTAS,
     MAX_FALHAS_SEGUIDAS,
     ESPERA_ENTRE_PASSADAS,
     EXTENSAO_PARTE,
@@ -112,18 +125,8 @@ def _consultar_parte(notebook_id, pasta, n, prompt):
     return resultado
 
 
-def processar_job(fila, pasta, job):
-    print(f"\n[NotebookLM] {os.path.basename(pasta)}")
-
-    extrair_zips(pasta)
-
-    arquivos = coletar_arquivos(pasta)
-    if not arquivos:
-        raise SemArquivos(
-            "Nenhum arquivo compatível (PDF/DOCX/TXT/MD) na pasta. "
-            + descrever_pasta(pasta)
-        )
-
+def _preparar_gemini(fila, pasta, job, arquivos):
+    """Cria o notebook (uma vez) e envia o que falta. Devolve a função que consulta uma parte."""
     limite = MAX_FONTES - 1  # 1 vaga é do modelo de relatório
     if len(arquivos) > limite:
         print(f"    Aviso: {len(arquivos)} arquivos; enviando só os {limite} primeiros.")
@@ -149,6 +152,40 @@ def processar_job(fila, pasta, job):
         salvar_fila(fila)
 
     time.sleep(PAUSA_APOS_UPLOAD)  # dá tempo para o NotebookLM terminar de indexar
+    return lambda n, prompt: _consultar_parte(notebook_id, pasta, n, prompt)
+
+
+def _preparar_claude(pasta, arquivos):
+    """Monta os documentos (texto/PDF) uma vez. Devolve a função que consulta uma parte."""
+    print("    Preparando os documentos para o Claude...")
+    try:
+        pacote = montar_pacote(pasta, arquivos, MODELO_RELATORIO)
+    except DocumentosInvalidos as erro:  # ex.: PDFs corrompidos no download: vale baixar de novo
+        raise SemArquivos(str(erro)) from erro
+    print(f"    {pacote.resumo()}")
+    if CLAUDE_MODO == "assinatura":
+        sessao = assinatura.Sessao(pacote, pasta)
+        return lambda n, prompt: sessao.consultar(prompt)
+    return lambda n, prompt: consultar_api(pacote.blocos, prompt)
+
+
+def processar_job(fila, pasta, job, ferramenta="gemini"):
+    nome = FERRAMENTAS[ferramenta]
+    print(f"\n[{nome}] {os.path.basename(pasta)}")
+
+    extrair_zips(pasta)
+
+    arquivos = coletar_arquivos(pasta)
+    if not arquivos:
+        raise SemArquivos(
+            "Nenhum arquivo compatível (PDF/DOCX/TXT/MD) na pasta. "
+            + descrever_pasta(pasta)
+        )
+
+    if ferramenta == "claude":
+        consultar_parte = _preparar_claude(pasta, arquivos)
+    else:
+        consultar_parte = _preparar_gemini(fila, pasta, job, arquivos)
 
     # Itens antigos (sem "prompt") eram todos do Bioin
     partes = obter_prompts(job.get("prompt", "bioin"))
@@ -164,29 +201,29 @@ def processar_job(fila, pasta, job):
             print(f"    Parte {n + 1}/{len(partes)} já respondida; reaproveitando.")
             continue
 
-        if n > 0:
+        if n > 0 and ferramenta == "gemini":
             time.sleep(PAUSA_APOS_UPLOAD)
         print(f"    Executando o prompt, parte {n + 1}/{len(partes)} (pode demorar alguns minutos)...")
         try:
-            respostas[n] = _consultar_parte(notebook_id, pasta, n, prompt)
+            respostas[n] = consultar_parte(n, prompt)
         except ParteIncompleta as erro:
             respostas[n] = erro.texto  # relatório parcial, com aviso nos pedaços que faltam
-            _salvar_relatorio(partes, respostas, destino, modelo)
+            _salvar_relatorio(partes, respostas, destino, modelo, nome)
             raise
         except Exception:
             if respostas:  # não perde o que já veio: grava o relatório parcial
-                _salvar_relatorio(partes, respostas, destino, modelo)
+                _salvar_relatorio(partes, respostas, destino, modelo, nome)
             raise
 
         _gravar(arq, respostas[n])
 
-    _salvar_relatorio(partes, respostas, destino, modelo)
+    _salvar_relatorio(partes, respostas, destino, modelo, nome)
     # relatório completo: o cache de retomada (parte_*.parte) não é mais preciso
     for arq in glob.glob(os.path.join(glob.escape(pasta), f"parte_*{EXTENSAO_PARTE}")):
         os.remove(arq)
 
 
-def montar_markdown(partes, respostas):
+def montar_markdown(partes, respostas, nome_ferramenta="NotebookLM"):
     """Une as respostas das partes; parte sem resposta vira um aviso visível no relatório."""
     blocos = []
     for n, (titulo, _) in enumerate(partes):
@@ -194,14 +231,14 @@ def montar_markdown(partes, respostas):
             blocos.append(f"## {titulo}")
         blocos.append(
             respostas.get(n)
-            or f"**[NÃO GERADO: {titulo or 'relatório'} - o NotebookLM não respondeu. "
+            or f"**[NÃO GERADO: {titulo or 'relatório'} - o {nome_ferramenta} não respondeu. "
                f"Para completar, {COMO_REPROCESSAR}.]**"
         )
     return "\n\n".join(blocos)
 
 
-def _salvar_relatorio(partes, respostas, destino, modelo):
-    markdown = montar_markdown(partes, respostas)
+def _salvar_relatorio(partes, respostas, destino, modelo, nome_ferramenta="NotebookLM"):
+    markdown = montar_markdown(partes, respostas, nome_ferramenta)
     try:
         gerar_relatorio(markdown, destino, modelo)
         faltam = len(partes) - len(respostas)
@@ -225,26 +262,35 @@ def _falhas_passageiras(fila):
     ]
 
 
-def _rodar_passada(fila, pendentes):
+def _rodar_passada(fila, pendentes, ferramenta="gemini"):
     falhas_seguidas = 0
-    consultou = True  # False se a licitação anterior falhou antes de falar com o NotebookLM
+    consultou = True  # False se a licitação anterior falhou antes de falar com a ferramenta
     for numero, (pasta, job) in enumerate(pendentes):
-        if numero > 0 and consultou:
+        if numero > 0 and consultou and ferramenta == "gemini":
             time.sleep(PAUSA_ENTRE_LICITACOES)  # evita consultas em sequência rápida
+        job["ferramenta"] = ferramenta  # registra qual ferramenta gerou (ou tentou gerar)
         try:
-            processar_job(fila, pasta, job)
+            processar_job(fila, pasta, job, ferramenta)
             job["status"] = "concluido"
             job["erro"] = None
             job.pop("sem_arquivos", None)
             falhas_seguidas = 0
             consultou = True
+        except ParadaGeral as erro:
+            # Sem login/chave ou limite da assinatura: todas as próximas falhariam igual
+            job["status"] = "erro"
+            job["erro"] = str(erro)
+            salvar_fila(fila)
+            print(f"    ERRO: {erro}")
+            raise
         except Exception as erro:
             job["status"] = "erro"
             job["erro"] = str(erro)
             job["sem_arquivos"] = isinstance(erro, SemArquivos)
             consultou = not isinstance(erro, SemArquivos)
             print(f"    ERRO: {erro}")
-            print(f"    (notebook: {job.get('notebook_id')})")
+            if ferramenta == "gemini":
+                print(f"    (notebook: {job.get('notebook_id')})")
             # Só conta "sem resposta/limite"; erro de arquivo, por exemplo, não conta
             falhas_seguidas = falhas_seguidas + 1 if erro_passageiro(erro) else 0
         salvar_fila(fila)
@@ -258,7 +304,9 @@ def _rodar_passada(fila, pendentes):
 @dataclass
 class ResultadoFila:
     """O que aconteceu ao processar a fila (quem chama decide o que perguntar ao usuário)."""
-    motivo_parada: str | None = None   # "sem_modelo" | "sem_login" | None (rodou normalmente)
+    # "sem_modelo" | "sem_login" (NotebookLM) | "sem_chave" | "sem_conexao" | "limite" (Claude)
+    # | None (rodou normalmente)
+    motivo_parada: str | None = None
     detalhe: str = ""                  # mensagem do problema, quando houve parada
     concluidos: int = 0
     total: int = 0
@@ -283,15 +331,37 @@ def _resultado(fila, motivo=None, detalhe=""):
     )
 
 
-def processar_fila(somente=None):
-    """Processa a fila. `somente` (conjunto de pastas) limita o trabalho a essas licitações."""
+def _testar_ferramenta(fila, ferramenta):
+    """Confere o acesso antes de começar. Devolve um ResultadoFila de parada, ou None se ok."""
+    if ferramenta == "claude":
+        try:
+            (assinatura.testar_conexao if CLAUDE_MODO == "assinatura" else testar_api)()
+        except SemChave as erro:
+            print(erro)
+            return _resultado(fila, "sem_chave", str(erro))
+        except Exception as erro:  # rede, modelo errado... (a mensagem já diz "Claude: ...")
+            print(erro)
+            return _resultado(fila, "sem_conexao", str(erro))
+        return None
+
+    try:
+        testar_conexao()
+    except Exception as erro:
+        print(f"Não consegui falar com o NotebookLM: {erro}")
+        return _resultado(fila, "sem_login", str(erro))
+    return None
+
+
+def processar_fila(somente=None, ferramenta="gemini"):
+    """Processa a fila com a `ferramenta` ("gemini" ou "claude").
+    `somente` (conjunto de pastas) limita o trabalho a essas licitações."""
     fila = carregar_fila()
     pendentes = [
         (p, j) for p, j in fila.items()
         if j.get("status") != "concluido" and (somente is None or p in somente)
     ]
 
-    print(f"\n===== FILA NOTEBOOKLM: {len(pendentes)} pendente(s) =====")
+    print(f"\n===== FILA ({FERRAMENTAS[ferramenta]}): {len(pendentes)} pendente(s) =====")
     if not pendentes:
         return _resultado(fila)
 
@@ -301,18 +371,21 @@ def processar_fila(somente=None):
         print("Coloque o arquivo modelo_relatorio.pdf nessa pasta (ou ajuste MODELO_RELATORIO em config.py).")
         return _resultado(fila, "sem_modelo", detalhe)
 
-    try:
-        testar_conexao()
-    except Exception as erro:
-        print(f"Não consegui falar com o NotebookLM: {erro}")
-        return _resultado(fila, "sem_login", str(erro))
+    parada = _testar_ferramenta(fila, ferramenta)
+    if parada:
+        return parada
 
+    custo_antes = custo_total()
     for passada in range(1, MAX_PASSADAS + 1):
         if passada > 1:
             pendentes = [(p, fila[p]) for p in _falhas_passageiras(fila) if somente is None or p in somente]
             print(f"\n===== PASSADA {passada}/{MAX_PASSADAS}: {len(pendentes)} para tentar de novo =====")
 
-        completou = _rodar_passada(fila, pendentes)
+        try:
+            completou = _rodar_passada(fila, pendentes, ferramenta)
+        except ParadaGeral as erro:
+            motivo = "limite" if isinstance(erro, LimiteAssinatura) else "sem_chave"
+            return _resultado(fila, motivo, str(erro))
         restantes = [p for p in _falhas_passageiras(fila) if somente is None or p in somente]
 
         if not completou or not restantes or passada == MAX_PASSADAS:
@@ -323,4 +396,6 @@ def processar_fila(somente=None):
 
     resultado = _resultado(fila)
     print(f"\nFila: {resultado.concluidos}/{resultado.total} concluído(s). Estado em: {ARQUIVO_FILA}")
+    if ferramenta == "claude" and custo_total() > custo_antes:
+        print(f"Custo estimado do Claude nesta rodada: US$ {custo_total() - custo_antes:.2f}")
     return resultado
