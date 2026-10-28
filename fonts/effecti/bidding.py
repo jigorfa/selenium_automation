@@ -2,13 +2,18 @@
 import os
 import time
 
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.common.exceptions import (
+    ElementClickInterceptedException,
+    NoSuchElementException,
+    TimeoutException,
+)
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from browser.change import aguardar_em_contextos, procurar_em_contextos
+from browser.direct_download import DownloadDiretoFalhou, baixar_url, criar_sessao, url_baixavel
 from browser.downloads import (
     aguardar_downloads,
     listar_arquivos,
@@ -103,12 +108,28 @@ def _salvar_print(driver, pasta, indice):
         pass
 
 
+def clicar_ignorando_popup(driver, elemento):
+    """Clique normal; se um pop-up/overlay estiver na frente, clica via JavaScript.
+    O clique por JavaScript dispara o elemento direto, sem depender de ele estar visível
+    ou desobstruído."""
+    try:
+        elemento.click()
+    except ElementClickInterceptedException:
+        driver.execute_script("arguments[0].click();", elemento)
+
+
 def baixar_pelo_clipe(driver, x_title):
+    """Abre o modal de anexos e baixa os arquivos. Devolve True se algo foi baixado.
+
+    Os links são lidos do HTML (atributo href) e baixados direto com requests, sem clicar:
+    um pop-up na frente do link não atrapalha. Se algum link não puder ser baixado assim
+    (sem permissão com a sessão do navegador, href que é JavaScript...), ele é clicado
+    como antes, deixando o Firefox baixar."""
     esperar_overlay_sumir(driver)
 
     botao_anexos = x_title.find_element(By.CSS_SELECTOR, SELETOR_CLIPE)
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", botao_anexos)
-    botao_anexos.click()
+    clicar_ignorando_popup(driver, botao_anexos)
 
     modal = WebDriverWait(driver, TIMEOUT_MODAL).until(
         EC.visibility_of_element_located((By.ID, "md-edital-anexo"))
@@ -117,13 +138,29 @@ def baixar_pelo_clipe(driver, x_title):
     links = modal.find_elements(By.CSS_SELECTOR, SELETOR_LINKS_MODAL)
     print(f"    Links de download no modal: {len(links)}")
 
-    sucesso = False
-    if links:
-        arquivos_antes = listar_arquivos()
+    # Lê os endereços de uma vez, antes de qualquer download (o modal pode mudar depois)
+    alvos = [(link, link.get_attribute("href")) for link in links]
 
-        for link in links:
-            print(f"    Baixando: {link.get_attribute('href')}")
-            link.click()
+    sucesso = False
+    if alvos:
+        arquivos_antes = listar_arquivos()
+        sessao = criar_sessao(driver)
+        para_clicar = []
+
+        for indice, (link, href) in enumerate(alvos, 1):
+            if not url_baixavel(href):
+                para_clicar.append((link, href))
+                continue
+            print(f"    Baixando: {href}")
+            try:
+                baixar_url(sessao, href, indice)
+            except DownloadDiretoFalhou as erro:
+                print(f"      Download direto falhou ({erro}); vou tentar clicando no link.")
+                para_clicar.append((link, href))
+
+        for link, href in para_clicar:
+            print(f"    Clicando para baixar: {href}")
+            driver.execute_script("arguments[0].click();", link)
             time.sleep(1)
 
         baixados = aguardar_downloads(arquivos_antes)
@@ -134,7 +171,7 @@ def baixar_pelo_clipe(driver, x_title):
             print("    Tempo esgotado aguardando os downloads.")
 
     try:
-        driver.find_element(By.CSS_SELECTOR, "#md-edital-anexo .close").click()
+        clicar_ignorando_popup(driver, driver.find_element(By.CSS_SELECTOR, "#md-edital-anexo .close"))
     except NoSuchElementException:
         pass
 

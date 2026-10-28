@@ -3,3 +3,4 @@ python-docx
 notebooklm-mcp-cli
 anthropic>=1.0
 pypdf
+requests
