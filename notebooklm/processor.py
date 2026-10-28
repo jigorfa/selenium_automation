@@ -42,7 +42,7 @@ from notebooklm.client import (
     testar_conexao,
 )
 from notebooklm.prompts import obter_alternativas, obter_prompts
-from notebooklm.queue import carregar_fila, salvar_fila
+from notebooklm.queue import carregar_fila, reenfileirar_sem_relatorio, salvar_fila
 from notebooklm.report import gerar_relatorio, modelo_para
 
 
@@ -355,6 +355,7 @@ def _testar_ferramenta(fila, ferramenta):
 def processar_fila(somente=None, ferramenta="gemini"):
     """Processa a fila com a `ferramenta` ("gemini" ou "claude").
     `somente` (conjunto de pastas) limita o trabalho a essas licitações."""
+    reenfileirar_sem_relatorio(somente)  # concluída, mas sem o relatório na pasta: volta para a fila
     fila = carregar_fila()
     pendentes = [
         (p, j) for p, j in fila.items()

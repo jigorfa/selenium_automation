@@ -30,7 +30,7 @@ from config import BASE_DIR, CLAUDE_MODO, COMO_REPROCESSAR, ENVIAR_NOTEBOOKLM, E
 from fonts import FONTES
 from notebooklm.client import ERROS_DE_LOGIN, erro_passageiro, login_nlm
 from notebooklm.processor import processar_fila
-from notebooklm.queue import carregar_fila, enfileirar, salvar_fila
+from notebooklm.queue import carregar_fila, enfileirar, reenfileirar_sem_relatorio, salvar_fila
 
 OPCAO_COMPLETO = "Baixar licitações e gerar relatórios (fluxo completo)"
 OPCAO_FILA = "Processar a fila de relatórios pendentes (sem baixar nada)"
@@ -220,6 +220,7 @@ def processar_fila_interativo(fonte=None, parametros=None, ferramenta=None):
     utilizável voltam ao download uma vez, ao fim da fila, e são processadas de novo.
     Sem `ferramenta`, pergunta ao usuário qual usar."""
     if ferramenta is None:
+        reenfileirar_sem_relatorio()  # antes de checar: relatório apagado da pasta = pendente de novo
         if not _ha_pendentes():
             print("\nNenhum relatório pendente na fila.")
             return
