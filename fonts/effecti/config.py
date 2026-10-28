@@ -1,21 +1,16 @@
+
 """Configurações exclusivas do Effecti."""
+
+import json
+from config import BASE_DIR
 
 NOME_FONTE = "effecti"
 
 URL_SISTEMA = "https://minha.effecti.com.br/#/avisos-configuracoes-perfis-v2"
 
-# Nomes exatamente como aparecem na coluna "Nome" da tabela de perfis
-PERFIS = [
-    "AF Temoteo",
-    "Bioin - Farmácia de Manipulação",
-    "Irmãos Costa & Licitações",
-    "Layane Cristine",
-    "Link of Americas",
-    "Loja do Militar",
-    "LP Soluções em Licitações",
-    "Migox - Gases",
-    "Tech Master",
-]
+# Empresas carregadas do arquivo empresas.json
+with open(BASE_DIR / "empresas.json", encoding="utf-8") as arquivo:
+    PERFIS = json.load(arquivo)
 
 PERFIL_BIOIN = "Bioin - Farmácia de Manipulação"
 

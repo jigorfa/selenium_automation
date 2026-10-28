@@ -83,11 +83,10 @@ def _gravar(arq, texto):
     with open(arq, "w", encoding="utf-8") as f:
         f.write(texto)
 
-
-def _consultar_parte(notebook_id, pasta, n, prompt):
+def _consultar_parte(notebook_id, pasta, n, prompt, perfil=None):
     """Consulta uma parte. Se o NotebookLM não gerar resposta, refaz em pedaços menores
     (cada pedaço respondido fica em cache, então uma nova rodada só refaz o que faltou)."""
-    pedacos = obter_alternativas(n)
+    pedacos = obter_alternativas(n, perfil)
     cache = lambda k: os.path.join(pasta, f"parte_{n + 1}_{k + 1}{EXTENSAO_PARTE}")
     ja_dividida = any(os.path.exists(cache(k)) for k in range(len(pedacos)))
 
@@ -152,7 +151,10 @@ def _preparar_gemini(fila, pasta, job, arquivos):
         salvar_fila(fila)
 
     time.sleep(PAUSA_APOS_UPLOAD)  # dá tempo para o NotebookLM terminar de indexar
-    return lambda n, prompt: _consultar_parte(notebook_id, pasta, n, prompt)
+
+    return lambda n, prompt: _consultar_parte(
+        notebook_id, pasta, n, prompt, perfil=job.get("perfil")
+    )
 
 
 def _preparar_claude(pasta, arquivos):
@@ -187,8 +189,13 @@ def processar_job(fila, pasta, job, ferramenta="gemini"):
     else:
         consultar_parte = _preparar_gemini(fila, pasta, job, arquivos)
 
-    # Itens antigos (sem "prompt") eram todos do Bioin
-    partes = obter_prompts(job.get("prompt", "bioin"))
+# Usa os prompts personalizados da empresa, quando cadastrados.
+# Caso contrário, mantém os prompts padrão.
+    partes = obter_prompts(
+        job.get("prompt", "bioin"),
+        perfil=job.get("perfil"),
+    )
+
     destino = os.path.join(pasta, NOME_RELATORIO)
     modelo = modelo_para(job.get("perfil"))
     respostas = {}
