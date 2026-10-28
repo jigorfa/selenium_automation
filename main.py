@@ -35,6 +35,7 @@ from notebooklm.queue import carregar_fila, enfileirar, salvar_fila
 OPCAO_COMPLETO = "Baixar licitações e gerar relatórios (fluxo completo)"
 OPCAO_FILA = "Processar a fila de relatórios pendentes (sem baixar nada)"
 OPCAO_LOGIN = "Fazer login em uma IA (Gemini ou Claude)"
+OPCAO_SAIR = "Sair"
 
 
 def escolher_fonte():
@@ -309,13 +310,29 @@ def fluxo_completo():
 
 
 def menu():
+    """Mostra o menu e, quando a ação termina (com sucesso, erro ou Ctrl+C), volta a ele.
+    Só encerra quando o usuário escolhe "Sair" (ou aperta Ctrl+C no próprio menu)."""
     acoes = {
         OPCAO_COMPLETO: fluxo_completo,
         OPCAO_FILA: processar_fila_interativo,
         OPCAO_LOGIN: fazer_login_ia,
     }
-    escolha = pedir_opcao("O que deseja fazer?", list(acoes), confirmar_escolha=False)
-    acoes[escolha]()
+    while True:
+        escolha = pedir_opcao("O que deseja fazer?", list(acoes) + [OPCAO_SAIR], confirmar_escolha=False)
+        if escolha == OPCAO_SAIR:
+            return
+
+        try:
+            acoes[escolha]()
+        except KeyboardInterrupt:
+            print("\n\nAção interrompida pelo usuário.")
+        except Exception as erro:  # um erro numa ação não pode fechar o programa
+            print(f"\nERRO inesperado: {erro}")
+            log = _registrar_erro()
+            if log:
+                print(f"Os detalhes foram salvos em: {log}")
+
+        print("\nVoltando ao menu inicial...")
 
 
 def main():

@@ -12,6 +12,9 @@ COMO USAR
         1. Baixar licitacoes e gerar relatorios  -> fluxo completo
         2. Processar e gerar relatórios pendentes -> so funciona após o download das licitações
         3. Fazer login nas ferramentas
+        4. Sair
+      Quando uma opcao termina, o programa volta sozinho a este menu (nao precisa abrir de novo).
+      Para encerrar, escolha "Sair".
 
     - O relatorio gerado (relatorio.docx) ficam dentro da pasta de cada licitação, na pasta "downloads".
 
